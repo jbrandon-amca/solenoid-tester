@@ -1,0 +1,111 @@
+#include <SPI.h>
+
+const int CS_PIN = 9;
+const float VREF = 5.0;  // LTC1298 reference = VCC = 5V
+
+// We'll use 180 kHz SPI as requested
+SPISettings adcSpiSettings(180000, MSBFIRST, SPI_MODE0);
+
+// Single conversion on selected channel (0 or 1), using the 3-byte sequence
+uint16_t readLTC1298_Single(uint8_t channel) {
+  uint8_t high, low;
+  uint8_t controlByte;
+
+  // Per your note:
+  // CH0 -> 0xA0
+  // CH1 -> 0xE0
+  controlByte = (channel == 0) ? 0xA0 : 0xE0;
+
+  SPI.beginTransaction(adcSpiSettings);
+  digitalWrite(CS_PIN, LOW);
+
+  // From LTC1298 datasheet SPI example:
+  SPI.transfer(0x01);               // first 8 clocks: start + upper control
+  high = SPI.transfer(controlByte); // second 8 clocks: lower control + high data bits
+  low  = SPI.transfer(0x00);        // third 8 clocks: low data bits
+
+  digitalWrite(CS_PIN, HIGH);
+  SPI.endTransaction();
+
+  // High byte: 0000 B11 B10 B9 B8
+  // Low byte:  B7 B6 B5 B4 B3 B2 B1 B0
+  return ((uint16_t)(high & 0x0F) << 8) | low;  // 12-bit result, 0..4095
+}
+
+// Take 'numSamples' readings at 'sampleRateHz' from selected channel, average them
+uint16_t readLTC1298_Avg(uint8_t channel, uint16_t numSamples, float sampleRateHz) {
+  if (numSamples == 0) return 0;
+
+  // Max achievable sample rate with 3 bytes @ 180 kHz:
+  // 24 clocks / 180 kHz ≈ 133.3 µs -> ~7.5 kS/s (with margin below)
+  const float clocksPerSample = 24.0f;
+  const float maxSampleRate = 180000.0f / clocksPerSample * 0.7f;
+
+  if (sampleRateHz > maxSampleRate) {
+    sampleRateHz = maxSampleRate;
+  }
+  if (sampleRateHz <= 0.0f) {
+    sampleRateHz = 1.0f; // avoid div-by-zero; fallback to 1 S/s
+  }
+
+  uint32_t intervalUs = (uint32_t)(1000000.0f / sampleRateHz);
+  uint32_t sum = 0;
+
+  unsigned long nextSampleTime = micros();
+
+  for (uint16_t i = 0; i < numSamples; i++) {
+    // Wait until it's time for the next sample
+    while ((long)(nextSampleTime - micros()) > 0) {
+      // spin
+    }
+
+    sum += readLTC1298_Single(channel);
+    nextSampleTime += intervalUs;
+  }
+
+  return (uint16_t)(sum / numSamples);
+}
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial) {
+    // wait for Serial (on some boards)
+  }
+
+  pinMode(CS_PIN, OUTPUT);
+  digitalWrite(CS_PIN, HIGH);
+
+  SPI.begin();
+
+  Serial.println("LTC1298 averaging demo (CH0 + CH1)");
+}
+
+void loop() {
+  // Example: average 500 samples at 5 kS/s, once per second
+  const uint16_t numSamples   = 500;
+  const float    sampleRateHz = 5000.0f;  // try up to ~7500.0f max with 180kHz SPI
+
+  uint16_t avgCodeCH0 = readLTC1298_Avg(0, numSamples, sampleRateHz);
+  uint16_t avgCodeCH1 = readLTC1298_Avg(1, numSamples, sampleRateHz);
+
+  float voltageCH0 = (avgCodeCH0 * VREF) / 4095.0f;
+  float voltageCH1 = (avgCodeCH1 * VREF) / 4095.0f;
+
+  Serial.print("CH0 Avg code: ");
+  Serial.print(avgCodeCH0);
+  Serial.print(" | Voltage: ");
+  Serial.print(voltageCH0, 4);
+  Serial.print(" V  ||  ");
+
+  Serial.print("CH1 Avg code: ");
+  Serial.print(avgCodeCH1);
+  Serial.print(" | Voltage: ");
+  Serial.print(voltageCH1, 4);
+  Serial.print(" V  ||  Samples: ");
+  Serial.print(numSamples);
+  Serial.print(" @ ");
+  Serial.print(sampleRateHz);
+  Serial.println(" S/s");
+
+  delay(1000);  // one averaged report per second
+}
