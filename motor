@@ -1,0 +1,52 @@
+#include <Arduino.h>
+#include <AccelStepper.h>
+
+// DM542 (common-cathode): "-" to GND, Arduino drives "+"
+constexpr uint8_t PUL_PIN = 5;   // PUL+
+constexpr uint8_t DIR_PIN = 6;   // DIR+
+constexpr uint8_t ENA_PIN = 7;   // ENA+
+
+// Given mechanics
+constexpr float STEP_SIZE_IN = 0.00015625f;        // inches per step
+constexpr float STEPS_PER_IN = 1.0f / STEP_SIZE_IN; // 6400 steps/in
+constexpr float MOVE_INCHES  = 0.1f;
+constexpr long  MOVE_STEPS   = (long)(MOVE_INCHES * STEPS_PER_IN + 0.5f); // 640
+
+AccelStepper stepper(AccelStepper::DRIVER, PUL_PIN, DIR_PIN);
+
+long target = 0;
+
+void enableDriver(bool en)
+{
+  // Common-cathode: HIGH = enable
+  digitalWrite(ENA_PIN, en ? HIGH : LOW);
+}
+
+void setup()
+{
+  pinMode(ENA_PIN, OUTPUT);
+  enableDriver(true);
+
+  // DM542 pulse width >= 2.5 µs
+  stepper.setMinPulseWidth(5);
+
+  // These were the original values
+  stepper.setMaxSpeed(1000);     // steps/sec  (~0.31 in/s)
+  stepper.setAcceleration(200); // aggressive accel (can sound bad)
+
+  stepper.setCurrentPosition(0);
+  target = MOVE_STEPS;
+  stepper.moveTo(target);
+}
+
+void loop()
+{
+  stepper.run();
+
+  if (stepper.distanceToGo() == 0)
+  {
+    target = (target == MOVE_STEPS) ? -MOVE_STEPS : MOVE_STEPS;
+    stepper.moveTo(target);
+    delay(1000);
+  }
+}
