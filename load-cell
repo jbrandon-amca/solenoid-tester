@@ -1,0 +1,46 @@
+#include <Arduino.h>
+#include "AD7124.h"
+
+// This sketch is for operation
+
+constexpr int CS_PIN = 10;
+constexpr int OTHER_CS_PIN = 9; 
+constexpr int RDY_PIN = 12;
+
+AD7124 loadCell(CS_PIN, RDY_PIN);
+
+void setup() {
+  pinMode(OTHER_CS_PIN, OUTPUT);
+  digitalWrite(OTHER_CS_PIN, HIGH);
+  Serial.begin(9600);
+  while (!Serial);
+
+  AD7124::ErrorCode initStatus = loadCell.begin();
+
+  if (initStatus != AD7124::ErrorCode::OK) {
+    Serial.println("Init failed.");
+    Serial.println(initStatus);
+    loadCell.dumpAllRegisters();
+    while (1);
+  }
+
+  
+}
+
+void loop() {
+  AD7124::WeightResult measurementResult = loadCell.getWeight();
+  AD7124::Result rawResult = loadCell.readData();
+
+//   Serial.print(F("Data: "));
+//   Serial.println(rawResult.data);
+
+  Serial.print(F("Weight: "));
+  Serial.print(measurementResult.weight);
+  Serial.println(" lbs");
+
+  if (measurementResult.status_code != AD7124::ErrorCode::OK) {
+    Serial.println("Error.");
+  }
+
+  delay(1000);
+}
